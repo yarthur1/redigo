@@ -29,7 +29,7 @@ import (
 )
 
 var (
-	_ ConnWithTimeout = (*activeConn)(nil)
+	_ ConnWithTimeout = (*activeConn)(nil)  // 检查activeConn是否实现ConnWithTimeout接口
 	_ ConnWithTimeout = (*errorConn)(nil)
 )
 
@@ -180,7 +180,7 @@ func (p *Pool) Get() Conn {
 	if err != nil {
 		return errorConn{err}
 	}
-	return &activeConn{p: p, pc: pc}
+	return &activeConn{p: p, pc: pc} // 返回activeConn对象指针，activeConn的close函数会将连接放回pool
 }
 
 // PoolStats contains pool statistics.
@@ -245,13 +245,13 @@ func (p *Pool) Close() error {
 
 func (p *Pool) lazyInit() {
 	// Fast path.
-	if atomic.LoadUint32(&p.chInitialized) == 1 {
+	if atomic.LoadUint32(&p.chInitialized) == 1 {  // 已经初始化了
 		return
 	}
 	// Slow path.
 	p.mu.Lock()
-	if p.chInitialized == 0 {
-		p.ch = make(chan struct{}, p.MaxActive)
+	if p.chInitialized == 0 {  // double check
+		p.ch = make(chan struct{}, p.MaxActive)   // 最大连接数
 		if p.closed {
 			close(p.ch)
 		} else {
@@ -278,16 +278,16 @@ func (p *Pool) get(ctx interface {
 			<-p.ch
 		} else {
 			select {
-			case <-p.ch:
+			case <-p.ch:      // 还没超过最大连接
 			case <-ctx.Done():
-				return nil, ctx.Err()
+				return nil, ctx.Err()  // context done
 			}
 		}
 	}
 
 	p.mu.Lock()
 
-	// Prune stale connections at the back of the idle list.
+	// Prune stale connections at the back of the idle list. // 每次get会清理idle timeout conn
 	if p.IdleTimeout > 0 {
 		n := p.idle.count
 		for i := 0; i < n && p.idle.back != nil && p.idle.back.t.Add(p.IdleTimeout).Before(nowFunc()); i++ {
@@ -296,11 +296,11 @@ func (p *Pool) get(ctx interface {
 			p.mu.Unlock()
 			pc.c.Close()
 			p.mu.Lock()
-			p.active--
+			p.active--  // 打开的连接数减一
 		}
 	}
 
-	// Get idle connection from the front of idle list.
+	// Get idle connection from the front of idle list. 优先返回空闲连接
 	for p.idle.front != nil {
 		pc := p.idle.front
 		p.idle.popFront()
@@ -334,27 +334,27 @@ func (p *Pool) get(ctx interface {
 		p.mu.Lock()
 		p.active--
 		if p.ch != nil && !p.closed {
-			p.ch <- struct{}{}
+			p.ch <- struct{}{}  // 占用一个chan
 		}
 		p.mu.Unlock()
 	}
 	return &poolConn{c: c, created: nowFunc()}, err
 }
-
+// 每一次get成功，可用的连接数减一，每一次put,可用的连接数加一
 func (p *Pool) put(pc *poolConn, forceClose bool) error {
 	p.mu.Lock()
 	if !p.closed && !forceClose {
 		pc.t = nowFunc()
-		p.idle.pushFront(pc)
+		p.idle.pushFront(pc)  // 前插放入空闲列表
 		if p.idle.count > p.MaxIdle {
-			pc = p.idle.back
+			pc = p.idle.back  // 取最后一个
 			p.idle.popBack()
 		} else {
 			pc = nil
 		}
 	}
 
-	if pc != nil {
+	if pc != nil {  // 如果空闲列表已经满了，则close conn
 		p.mu.Unlock()
 		pc.c.Close()
 		p.mu.Lock()
@@ -362,7 +362,7 @@ func (p *Pool) put(pc *poolConn, forceClose bool) error {
 	}
 
 	if p.ch != nil && !p.closed {
-		p.ch <- struct{}{}
+		p.ch <- struct{}{}  // 如果有wait chan,唤醒
 	}
 	p.mu.Unlock()
 	return nil
@@ -425,7 +425,7 @@ func (ac *activeConn) Close() error {
 		}
 	}
 	pc.c.Do("")
-	ac.p.put(pc, ac.state != 0 || pc.c.Err() != nil)
+	ac.p.put(pc, ac.state != 0 || pc.c.Err() != nil)  // 放回连接池
 	return nil
 }
 
@@ -524,7 +524,7 @@ type poolConn struct {
 	next, prev *poolConn
 }
 
-func (l *idleList) pushFront(pc *poolConn) {
+func (l *idleList) pushFront(pc *poolConn) { // 双向链表前插
 	pc.next = l.front
 	pc.prev = nil
 	if l.count == 0 {
@@ -549,7 +549,7 @@ func (l *idleList) popFront() {
 	pc.next, pc.prev = nil, nil
 }
 
-func (l *idleList) popBack() {
+func (l *idleList) popBack() { //切断指针关联，也没有返回？
 	pc := l.back
 	l.count--
 	if l.count == 0 {

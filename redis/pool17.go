@@ -31,5 +31,5 @@ func (p *Pool) GetContext(ctx context.Context) (Conn, error) {
 	if err != nil {
 		return errorConn{err}, err
 	}
-	return &activeConn{p: p, pc: pc}, nil
+	return &activeConn{p: p, pc: pc}, nil // 返回activeConn对象指针
 }
